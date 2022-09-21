@@ -1,0 +1,218 @@
+import keras
+from keras.layers import Activation, Dense, Dropout, Flatten
+from keras.layers import LSTM, RepeatVector, TimeDistributed
+from keras.layers import BatchNormalization
+from keras.models import Sequential, Model
+import tensorflow as tf
+import os
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+prices_path = "prices.csv"
+prices_data = pd.read_csv(prices_path)
+prices_data.head()
+#len(prices_data)
+
+prices_data.drop(prices_data.index[0],inplace = True)
+df = prices_data.T
+df
+
+prices_data.fillna(method = 'bfill',inplace = True)
+
+len(prices_data)
+prices_data.replace([np.inf, -np.inf], np.nan, inplace=True)
+prices_data.dropna(inplace=True)
+len(prices_data)
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+X_std = scaler.fit_transform(prices_data)
+
+from sklearn.decomposition import PCA
+
+pca = PCA(n_components=3)
+prices_data_pca = pca.fit_transform(X_std)
+
+principalDf = pd.DataFrame(data = prices_data_pca, columns = ['pc1', 'pc2','pc3'])
+
+pca.components_
+pca.explained_variance_ratio_
+cumsum = np.cumsum(pca.explained_variance_ratio_)
+d = np.argmax(cumsum >= 0.95) + 1
+d
+plt.figure(figsize=(6,4))
+plt.plot(cumsum, linewidth=3)
+plt.axis([0, 400, 0, 1])
+plt.xlabel("Dimensions")
+plt.ylabel("Explained Variance")
+plt.plot([d, d], [0, 0.95], "k:")
+plt.plot([0, d], [0.95, 0.95], "k:")
+plt.plot(d, 0.95, "ko")
+plt.annotate("Elbow", xy=(65, 0.85), xytext=(70, 0.7),
+             arrowprops=dict(arrowstyle="->"), fontsize=16)
+plt.grid(True)
+plt.show()
+principalDf.head()
+fig = plt.figure(figsize = (8,8))
+ax = fig.add_subplot(1,1,1) 
+ax.set_xlabel('Principal Component 1', fontsize = 15)
+ax.set_ylabel('Principal Component 2', fontsize = 15)
+ax.set_title('2 component PCA', fontsize = 20)
+
+ax.scatter(principalDf.pc1, principalDf.pc2)
+
+ax.grid()
+# Daily Returns
+daily_returns = prices_data.apply(np.log).diff(1) 
+daily_returns.tail()
+
+from sklearn.manifold import TSNE
+
+tsne = TSNE(n_components=2, random_state=42)
+prices_data_tsne = tsne.fit_transform(X_std)
+prices_data_tsne.shape
+
+plt.figure(figsize=(13,10))
+plt.scatter(prices_data_tsne[:, 0], prices_data_tsne[:, 1], cmap="jet")
+plt.axis('off')
+plt.colorbar()
+plt.show()
+
+path = 'SPY.csv'
+sp_data = pd.read_csv(path)
+sp_data.head()
+len(sp_data)
+
+sp_data.isna().sum().sum()
+sp_data.shape
+sp_data.head()
+sp_data.isnull().sum().sum()
+
+sp_data = sp_data.set_index('Date')
+sp_data.head()
+
+sp_data.drop(columns=['Open','High','Low','Volume','Adj Close'],inplace=True)
+
+sp_data.tail()
+print('Share price visualization:')
+plt.figure(figsize = (15,5))
+plt.plot(sp_data)
+plt.title('Share price visualization')
+plt.xlabel ('Date')
+plt.ylabel ('Closing Value')
+plt.show()
+# Generate Boxplot
+print('Box plot visualization:')
+sp_data.plot(kind='box', figsize = (10,4))
+plt.show()
+
+# Generate Histogram
+print('Histogram visualization:')
+sp_data.plot(kind='hist', figsize = (10,4) )
+plt.show()
+
+train_size = int(len(sp_data)*0.95)
+test_size = len(sp_data) - train_size
+train_size
+test_size
+
+train,test = sp_data.iloc[0:train_size],sp_data.iloc[train_size:len(sp_data)]
+print(train.shape)
+print(test.shape)
+
+# data standardization
+from sklearn.preprocessing import RobustScaler
+robust = RobustScaler(quantile_range=(25, 75)).fit(train[['Close']])
+train['price'] = robust.transform(train[['Close']])
+test['price'] = robust.transform(test[['Close']])
+
+# Using window size as 30 (1 month)
+def create_dataset(X, y, time_steps=1):
+  a, b = [], []
+  for i in range(len(X) - time_steps):
+     v = X.iloc[i:(i + time_steps)].values
+     #print("\n i= ",i)
+     #print("\n v= ", v)
+     a.append(v)
+     #print("\n Append to b: ",y.iloc[i + time_steps])
+     b.append(y.iloc[i + time_steps])
+  return np.array(a), np.array(b)
+
+# We’ll create sequences with 30 days of historical data
+n_steps = 30
+
+# reshape to 3D [n_samples, n_steps, n_features]
+X_train, y_train = create_dataset(train[['price']], train['price'], n_steps)
+X_test, y_test = create_dataset(test[['price']], test['price'], n_steps)
+
+print('X_train shape: ', X_train.shape)
+print('y_train shape: ', y_train.shape)
+print('X_test shape:', X_test.shape)
+print('y_test shape:', y_test.shape)
+
+units = 64
+dropout = 0.10
+optimizer = 'adam'
+loss = 'mae'
+epochs = 30
+
+model = keras.Sequential()
+model.add(keras.layers.LSTM(units=units,input_shape=(X_train.shape[1],X_train.shape[2])))
+model.add(keras.layers.Dropout(rate=dropout))
+model.add(keras.layers.RepeatVector(n=X_train.shape[1]))
+model.add(keras.layers.LSTM(units=units,return_sequences=True))
+model.add(keras.layers.Dropout(rate=dropout))
+model.add(keras.layers.TimeDistributed(keras.layers.Dense(units=X_train.shape[2])))
+model.compile(optimizer=optimizer, loss=loss)
+history = model.fit(X_train,y_train,epochs=epochs, batch_size=32,validation_split=0.1,shuffle=False)
+
+# history for loss
+plt.figure(figsize = (10,5))
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('model loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'], loc='upper left')
+plt.show()
+
+# Calculating MAE on train data
+train_pred = model.predict(X_train)
+train_loss = (np.mean(np.abs(train_pred-X_train),axis=1))
+avg_loss = train_loss.mean()
+train_loss
+print("Training Loss: ", avg_loss)
+train_pred.shape
+
+plt.figure(figsize=(10,5))
+sns.distplot(train_loss,bins=50,kde=True)
+plt.title("Distribution of Training Loss")
+plt.show()
+
+# Accuracy metrics on test data
+# MAE on the test data:
+y_pred = model.predict(X_test)
+print('Predict shape:', y_pred.shape)
+mae = np.mean(np.abs(y_pred - X_test), axis=1)
+print("Mean absolute error = ", mae)
+
+# reshaping prediction
+pred = y_pred.reshape((y_pred.shape[0] * y_pred.shape[1]), y_pred.shape[2])
+print('Prediction:', pred.shape); print();
+print('Test data shape:', X_test.shape); print();
+
+# reshaping test data
+X_test = X_test.reshape((X_test.shape[0] * X_test.shape[1]), X_test.shape[2])
+print('Test data:', X_test.shape); print();
+
+import math
+from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_absolute_error
+# error computation
+errors = X_test - pred
+print('Shape of errors:', errors.shape); print();
+
+# rmse on test data
+RMSE = math.sqrt(mean_squared_error(X_test, pred))
+print('Test RMSE: %.3f' % RMSE);
