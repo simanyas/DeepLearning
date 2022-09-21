@@ -1,0 +1,149 @@
+from tensorflow.keras.optimizers import RMSprop
+from keras.preprocessing.image import ImageDataGenerator
+from keras.models import Sequential
+from keras.layers import Conv2D, Input, ZeroPadding2D, BatchNormalization, Activation, MaxPooling2D, Flatten, Dense,Dropout
+from keras.models import Model, load_model
+from keras.callbacks import TensorBoard, ModelCheckpoint
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score
+from sklearn.utils import shuffle
+import numpy as np
+import pandas as pd
+import PIL
+from matplotlib import pyplot as plt
+from keras.applications.vgg16 import VGG16
+from tensorflow.keras.applications.resnet50 import ResNet50
+from tensorflow import keras
+import glob, os
+
+partial = glob.glob("/content/MP2_FaceMask_Dataset/train/partial_mask/*")
+on = glob.glob("/content/MP2_FaceMask_Dataset/train/with_mask/*")
+off = glob.glob("/content/MP2_FaceMask_Dataset/train/without_mask/*")
+len(partial), len(on), len(off)
+
+total = partial + on + off
+len(total)
+
+height, width  = [],[]
+for i in total:
+  im = PIL.Image.open(i)
+  height.append(np.array(im).shape[0])
+  width.append(np.array(im).shape[1])
+  
+print(max(height),min(height), sum(height)/len(height))
+print(max(width),min(width),sum(width)/len(width))
+
+TRAINING_DIR = "/content/MP2_FaceMask_Dataset/train/"
+VALIDATION_DIR = "/content/MP2_FaceMask_Dataset/test/"
+
+train_generator.class_indices
+next(train_generator)[0].shape
+
+input_shap = next(train_generator)[0].shape[1:]
+input_shap
+
+plt.imshow(next(train_generator)[0][0]);
+
+fig = plt.figure(figsize=(8, 8))
+columns = 4
+rows = 5
+for i in range(1, columns*rows +1):
+    fig.add_subplot(rows, columns, i)
+    plt.imshow(next(train_generator)[0][0])
+plt.show()
+
+model1 = Sequential([
+    Conv2D(100, (3,3), activation='relu', input_shape=(input_shap)),            #convolutional layer 1: No. of filters=100, filter size=3x3, activation = relu, input_shap = 224x224x3,
+    MaxPooling2D(2,2),                                                          #Maxpooling2D filter size=2x2
+    
+    Conv2D(100, (3,3), activation='relu'),                                      #convolutional layer 2: No. of filters=100, filter size=3x3, activation = relu,
+    MaxPooling2D(2,2),                                                          #Maxpooling2D filter size=2x2
+    
+    Flatten(),
+    Dropout(0.5),
+    Dense(50, activation='relu'),
+    Dense(train_generator.num_classes, activation='softplus')
+])
+model1.compile(optimizer='adam', loss='binary_crossentropy', metrics=['acc'])
+
+model1.summary()
+
+history1 = model1.fit(train_generator,epochs=5,validation_data=validation_generator)
+
+plt.plot(history1.history['loss'],'r',label='training loss')
+plt.plot(history1.history['val_loss'],label='validation loss')
+plt.xlabel('# epochs')
+plt.ylabel('loss')
+plt.legend()
+plt.show()
+
+model2 = Sequential([
+    Conv2D(16, (3,3), activation='relu', input_shape=(input_shap)),
+    MaxPooling2D(2,2),
+    
+    Conv2D(32, (3,3), activation='relu'),
+    MaxPooling2D(2,2),
+
+    Conv2D(64, (2,2),activation='relu'),
+    MaxPooling2D(2,2),
+
+    Conv2D(128, (2,2),activation='relu'),
+    MaxPooling2D(2,2),
+    
+    Flatten(),
+    Dropout(0.5),
+    Dense(1920, activation='relu'),
+    Dense(480, activation='relu'),
+    Dense(32, activation='relu'),
+    Dense(train_generator.num_classes, activation='softmax')
+])
+model2.compile(optimizer='adam', loss='binary_crossentropy', metrics=['acc'])
+
+history2 = model2.fit(train_generator,epochs=5,validation_data=validation_generator)
+
+plt.plot(history2.history['loss'],'r',label='training loss')
+plt.plot(history2.history['val_loss'],label='validation loss')
+plt.xlabel('# epochs')
+plt.ylabel('loss')
+plt.legend()
+plt.show()
+
+model_vgg = Sequential()
+model_vgg.add(VGG16(weights='imagenet',include_top=False,input_shape=(input_shap)))
+model_vgg.add(Flatten())
+model_vgg.add(Dense(128,activation="relu",kernel_initializer="he_normal",
+                           kernel_regularizer=keras.regularizers.l2(0.01)))
+model_vgg.add(Dense(train_generator.num_classes,activation='softmax'))
+model_vgg.summary()
+
+optimizer_adam = keras.optimizers.Adam(learning_rate=0.00001)
+model_vgg.compile(optimizer=optimizer_adam, loss='categorical_crossentropy', metrics=['acc'])
+
+history3 = model_vgg.fit(train_generator,epochs=5,
+                              validation_data=validation_generator, class_weight={0:1.0,1:0.8,2:1.2})
+                              
+plt.plot(history3.history['loss'],'r',label='training loss')
+plt.plot(history3.history['val_loss'],label='validation loss')
+plt.xlabel('# epochs')
+plt.ylabel('loss')
+plt.legend()
+plt.show()
+
+model_resnet = Sequential()
+model_resnet.add(ResNet50(weights='imagenet',include_top=False,input_shape=(input_shap)))
+model_resnet.add(Flatten())
+model_resnet.add(Dense(128))
+model_resnet.add(Dense(train_generator.num_classes,activation='softmax'))
+model_resnet.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['acc'])
+model_resnet.build((next(train_generator)[0].shape))
+model_resnet.summary()
+
+history3 = model_resnet.fit(train_generator,epochs=5,
+                    validation_data=validation_generator)
+                    
+plt.plot(history3.history['loss'],'r',label='training loss')
+plt.plot(history3.history['val_loss'],label='validation loss')
+plt.xlabel('# epochs')
+plt.ylabel('loss')
+plt.legend()
+plt.show()
